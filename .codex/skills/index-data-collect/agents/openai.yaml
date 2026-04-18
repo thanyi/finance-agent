@@ -1,0 +1,4 @@
+interface:
+  display_name: "Index Data Collect"
+  short_description: "采集A股指数估值、趋势与拥挤度基础数据"
+  default_prompt: "Use $index-data-collect to gather valuation, trend, and crowding data for an A-share index."
