@@ -106,6 +106,24 @@ balance_df = pd.concat(balance_list, ignore_index=True) if balance_list else pd.
 cash_df    = pd.concat(cash_list,    ignore_index=True) if cash_list    else pd.DataFrame()
 dupont_df  = pd.concat(dupont_list,  ignore_index=True) if dupont_list  else pd.DataFrame()
 
+# ── 利润数据展示 ──────────────────────────────────────────────
+cols_p = ["statDate", "roeAvg", "npMargin", "gpMargin", "netProfit", "MBRevenue"]
+if not profit_df.empty:
+    # 年报部分：只展示 -12-31 的年报数据
+    annual_profit = profit_df[profit_df["statDate"].str.endswith("-12-31")].copy()
+    print("=== 年度利润数据（年报） ===")
+    print(annual_profit[cols_p].to_string(index=False))
+
+    # 最新季度补充：展示当年已披露的最新非年报季度行
+    non_annual = profit_df[~profit_df["statDate"].str.endswith("-12-31")].copy()
+    if not non_annual.empty:
+        latest_quarter = non_annual.sort_values("statDate").iloc[[-1]]
+        print("\n=== 最新季度（累计数据，非全年）===")
+        print(latest_quarter[cols_p].to_string(index=False))
+        print("注：季度数据为年初至该季度末的累计值，非全年口径")
+    else:
+        print("\n[数据缺失：当年季度报告暂未入库]")
+
 # ── 历史月度行情 ───────────────────────────────────────────────
 rs = bs.query_history_k_data_plus(
     symbol_bs, "date,close,volume,turn",
@@ -246,10 +264,12 @@ if not profit_df.empty:
 
 # 4. BaoStock 是否返回最新年份（检查数据时效）
 if not profit_df.empty:
-    latest_date = profit_df["statDate"].max()
-    print("BaoStock 最新数据截止：{}".format(latest_date))
-    if latest_date < "2025-01-01":
-        print("[WARN] BaoStock 未包含2025年数据，需手动补充")
+    from datetime import date
+    latest = pd.to_datetime(profit_df["statDate"]).max().date()
+    print("BaoStock 最新数据截止：{}".format(latest))
+    months_lag = (date.today() - latest).days / 30
+    if months_lag > 6:
+        print(f"[WARN] BaoStock最新数据为{latest}，距今约{months_lag:.0f}个月，建议手动补充最新季报")
 ```
 
 ---
