@@ -31,6 +31,30 @@ pip install akshare baostock requests pandas numpy
 
 ---
 
+## Step 1a — 系统代理处理（macOS 全局代理 / Clash 环境下必须）
+
+> 部分环境下 macOS 将系统代理设为 `127.0.0.1:7897`（ClashX / Surge / V2rayU 等），导致 `push2his.eastmoney.com`、`push2.eastmoney.com`、`88.push2.eastmoney.com` 等 API 域名被拦截，表现为 `ProxyError: Unable to connect to proxy` 或 `RemoteDisconnected`。  
+> 以下两种方案任选其一，用于所有需要访问易被拦截域名的场景。
+
+**方案 A：requests Session + trust_env=False（推荐）**
+```python
+import requests
+session = requests.Session()
+session.trust_env = False  # 绕过 macOS 系统代理
+resp = session.get(url, timeout=15)  # 而非 requests.get()
+```
+
+**方案 B：urllib + ProxyHandler({})**
+```python
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+with opener.open(url, timeout=15) as resp:
+    ...
+```
+
+> `bond_zh_us_rate()` 等少数函数访问的是不受拦截的域名，不需要此处理。
+
+---
+
 ## Step 2 — 确认指数代码、BaoStock 前缀与风格标签
 
 > 指数不像股票，不能只靠首位数字机械判断市场；优先使用常见指数映射表，未知指数必须手动确认。
@@ -62,20 +86,43 @@ target = "399006"  # ← 替换为目标指数名称或代码
 key = ALIASES.get(target, target)
 meta = COMMON_INDEX_MAP.get(key)
 
+# ── 动态发现：若不在映射表中，通过 AKShare 搜索 ──
 if meta is None:
-    raise ValueError("未收录的指数，请先到中证指数官网/交易所官网确认 code 与 bs_code，再继续")
+    try:
+        import akshare as ak
+        all_idx = ak.index_csindex_all()
+        search_cols = ["指数简称", "指数代码", "指数全称"]
+        for col in all_idx.columns:
+            if col not in search_cols:
+                continue
+            mask = all_idx[col].astype(str).str.contains(target, na=False)
+            if mask.any():
+                row = all_idx[mask].iloc[0]
+                index_name  = str(row.get("指数简称", row.get("指数全称", target)))
+                index_code  = str(row["指数代码"])
+                index_style = "theme"
+                print(f"[动态发现] {index_name}({index_code})，默认风格标签=theme")
+                meta = {"code": index_code, "style": index_style, "use_relative_pe": False,
+                        "index_name": index_name}
+                break
+    except Exception as e:
+        print(f"[动态发现失败] {e}")
 
-index_name         = key
+if meta is None:
+    raise ValueError("未收录的指数，请先到中证指数官网/交易所官网确认代码，再继续")
+
+index_name         = meta.get("index_name", key) if meta.get("index_name") else key
 index_code         = meta["code"]
-index_bs_code      = meta["bs_code"]
+index_bs_code      = meta.get("bs_code")  # 可能为 None
 index_style        = meta["style"]
-benchmark_bs_code  = meta["benchmark_bs_code"]
-use_relative_pe    = meta["use_relative_pe"]
+benchmark_bs_code  = meta.get("benchmark_bs_code", "sh.000300")
+use_relative_pe    = meta.get("use_relative_pe", False)
 
-print(index_name, index_code, index_bs_code, index_style)
+print(index_name, index_code, index_bs_code or "BaoStock代码未知", index_style)
 ```
 
-> 若指数不在映射表内，先去中证指数官网确认名称、代码、指数编制机构，再手动填入 `index_code` 和 `index_bs_code`。  
+> 若动态发现也未命中，先去中证指数官网确认名称、代码，再手动填入。  
+> **注意**：中证 93xxxx / 932xxx 系列主题指数通常不在 BaoStock 收录范围内，Step 3 会降级走腾讯行情代理。  
 > 成长风格指数（创业板指、科创50、中证1000）后续必须额外采集相对沪深300 的估值比值。
 
 ---
@@ -99,8 +146,11 @@ fields_candidates = [
 ]
 
 hist_df = pd.DataFrame()
-bs.login()
-for fields in fields_candidates:
+if index_bs_code is None:
+    print(f"[跳过] BaoStock 无 {index_code} 代码，直接尝试腾讯行情...")
+else:
+    bs.login()
+    for fields in fields_candidates:
     rs = bs.query_history_k_data_plus(
         index_bs_code,
         fields,
@@ -114,10 +164,45 @@ for fields in fields_candidates:
     if rows:
         hist_df = pd.DataFrame(rows, columns=fields.split(","))
         break
-bs.logout()
+if index_bs_code is not None:
+    bs.logout()
 
 if hist_df.empty:
-    print("[数据缺失：指数历史行情，原因：BaoStock 未返回数据]")
+    print("[降级] BaoStock 未收录该指数，尝试腾讯行情代理...")
+    try:
+        import requests as _req, json as _json
+        _session = _req.Session()
+        _session.trust_env = False  # 绕过系统代理
+        _tx_url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sz{index_code},day,,,1000,qfq"
+        _resp = _session.get(_tx_url, timeout=15)
+        _tx_data = _resp.json()
+        _klines = _tx_data.get("data", {}).get(f"sz{index_code}", {}).get("day", [])
+        if not _klines:
+            # 若指数代码查不到，尝试用 ETF 代理标识（需调用者传入 etf_proxy_code）
+            _etf_proxy = globals().get("etf_proxy_code")
+            if _etf_proxy:
+                _tx_url2 = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sz{_etf_proxy},day,,,1000,qfq"
+                _resp2 = _session.get(_tx_url2, timeout=15)
+                _tx_data2 = _resp2.json()
+                _klines = _tx_data2.get("data", {}).get(f"sz{_etf_proxy}", {}).get("day", [])
+                if _klines:
+                    print(f"[代理] 使用 ETF {_etf_proxy} 行情代理指数 {index_code}")
+        if _klines:
+            _rows = []
+            for _k in _klines:
+                # 腾讯格式: [date, open, close, high, low, volume]
+                _rows.append({"date": _k[0], "open": float(_k[1]), "close": float(_k[2]),
+                              "high": float(_k[3]), "low": float(_k[4]), "volume": float(_k[5])})
+            hist_df = pd.DataFrame(_rows)
+            hist_df["date"] = pd.to_datetime(hist_df["date"])
+            hist_df = hist_df.sort_values("date").reset_index(drop=True)
+            print(f"[腾讯行情] {len(hist_df)} 个交易日，{hist_df['date'].min().date()} → {hist_df['date'].max().date()}")
+            print(f"[注] 腾讯行情缺少 turn（换手率）字段，后续拥挤度改用成交额代理")
+    except Exception as _e:
+        print(f"[腾讯行情失败] {_e}")
+
+if hist_df.empty:
+    print("[数据缺失：指数历史行情，BaoStock + 腾讯均未返回数据]")
 else:
     for col in [c for c in ["open", "high", "low", "close", "pctChg", "volume", "amount", "turn"] if c in hist_df.columns]:
         hist_df[col] = pd.to_numeric(hist_df[col], errors="coerce")
@@ -135,65 +220,53 @@ else:
 
 ---
 
-## Step 4 — 指数估值历史（PE / PB）与 5 年分位
+## Step 4 — 指数估值（PE 与 5 年分位）
 
 > `choose-index-now` 的估值判断只需要当前值和 5 年分位。  
-> 自动接口可尝试，但主结论必须优先信任中证指数官网、理杏仁等可验证来源；拿不到就标注 `[数据缺失：原因]`。
+> 当前 AKShare 版本使用 `stock_zh_index_value_csindex` 获取指数估值，**仅返回 PE（市盈率）和股息率，不再返回 PB（市净率）**。
 
 ```python
 import akshare as ak
 import pandas as pd
 
 pe_hist = None
-pb_hist = None
+current_pe = None
+pe_pct_5y = None
 
 try:
-    pe_hist = ak.index_value_hist_funddb(symbol=index_name, indicator="市盈率")
-    pb_hist = ak.index_value_hist_funddb(symbol=index_name, indicator="市净率")
+    # stock_zh_index_value_csindex 返回 {日期, 指数代码, …, 市盈率1, 市盈率2, 股息率1, 股息率2}
+    val_df = ak.stock_zh_index_value_csindex(symbol=index_code)
+    val_df["日期"] = pd.to_datetime(val_df["日期"])
+    val_df["市盈率1"] = pd.to_numeric(val_df["市盈率1"], errors="coerce")
+    val_df = val_df[["日期", "市盈率1"]].dropna().sort_values("日期").reset_index(drop=True)
+    val_df.columns = ["date", "pe"]
+    pe_hist = val_df
+
+    # 5年分位
+    latest_date = pe_hist["date"].max()
+    five_year_df = pe_hist[pe_hist["date"] >= latest_date - pd.DateOffset(years=5)].copy()
+    current_pe = float(five_year_df["pe"].iloc[-1])
+    pe_pct_5y = (five_year_df["pe"] <= current_pe).mean() * 100
+    pe_5y_min = five_year_df["pe"].min()
+    pe_5y_max = five_year_df["pe"].max()
+
+    print(f"当前PE：{current_pe:.2f}  |  5年分位：{pe_pct_5y:.1f}%")
+    print(f"PE 5年区间：[{pe_5y_min:.2f}, {pe_5y_max:.2f}]")
 except Exception as e:
-    print(f"[数据缺失：AKShare 指数估值接口，原因：{e}]")
+    print(f"[数据缺失：指数 PE 数据，原因：{e}]")
 
-def normalize_val_df(df, value_name):
-    if df is None or getattr(df, "empty", True):
-        return None
-    df = df.copy()
-    cols = list(df.columns)
-    date_col = next((c for c in cols if "date" in c.lower() or "日期" in c), None)
-    value_col = next((c for c in cols if value_name in c or c.lower() in {"pe", "pb"}), None)
-    if not date_col or not value_col:
-        return None
-    out = df[[date_col, value_col]].rename(columns={date_col: "date", value_col: value_name})
-    out["date"] = pd.to_datetime(out["date"])
-    out[value_name] = pd.to_numeric(out[value_name], errors="coerce")
-    return out.dropna().sort_values("date").reset_index(drop=True)
-
-pe_hist = normalize_val_df(pe_hist, "pe")
-pb_hist = normalize_val_df(pb_hist, "pb")
-
-def calc_5y_percentile(df, col):
-    if df is None or df.empty:
-        return None, None
-    latest_date = df["date"].max()
-    five_year_df = df[df["date"] >= latest_date - pd.DateOffset(years=5)].copy()
-    if five_year_df.empty:
-        return None, None
-    current_value = five_year_df[col].iloc[-1]
-    percentile = (five_year_df[col] <= current_value).mean() * 100
-    return current_value, percentile
-
-current_pe, pe_pct_5y = calc_5y_percentile(pe_hist, "pe")
-current_pb, pb_pct_5y = calc_5y_percentile(pb_hist, "pb")
-
-print(f"当前PE：{current_pe:.2f}  |  5年分位：{pe_pct_5y:.1f}%" if current_pe is not None else "PE：[数据缺失]")
-print(f"当前PB：{current_pb:.2f}  |  5年分位：{pb_pct_5y:.1f}%" if current_pb is not None else "PB：[数据缺失]")
+# PB 不再可用
+current_pb = None
+pb_pct_5y = None
+print("PB：[数据缺失：stock_zh_index_value_csindex 不再返回 PB 数据]")
 ```
 
 若自动接口不可用，按下面路径手动补：
 
 | 数据项 | 优先来源 | 备用来源 |
 |--------|----------|----------|
-| PE / PB 当前值 | 中证指数官网指数详情页 | 理杏仁 |
-| PE / PB 历史分位 | 理杏仁 | 手动导出历史序列后计算 |
+| PE 当前值与 5 年分位 | 中证指数官网 → 指数估值页 | 理杏仁 |
+| PB（市净率） | 理杏仁（中证指数官网已不提供） | 无，需手动从年报导出 |
 
 ---
 
@@ -300,20 +373,22 @@ relative_pe_ratio = None
 relative_pe_pct_5y = None
 
 if use_relative_pe and pe_hist is not None and not pe_hist.empty:
-    # 参照 Step 4 的同样方法，再采一次 benchmark_bs_code 对应指数的 PE 历史
-    # 这里默认以沪深300 为基准
-    benchmark_name = "沪深300"
-    benchmark_pe_hist = None
+    # 参照 Step 4 的同样方法，再采一次沪深300 的 PE 历史
+    benchmark_code = "000300"
+    benchmark_pe_df = None
     try:
-        benchmark_pe_hist = ak.index_value_hist_funddb(symbol=benchmark_name, indicator="市盈率")
-        benchmark_pe_hist = normalize_val_df(benchmark_pe_hist, "pe")
+        _bm_raw = ak.stock_zh_index_value_csindex(symbol=benchmark_code)
+        _bm_raw["日期"] = pd.to_datetime(_bm_raw["日期"])
+        _bm_raw["市盈率1"] = pd.to_numeric(_bm_raw["市盈率1"], errors="coerce")
+        benchmark_pe_df = _bm_raw[["日期", "市盈率1"]].dropna().sort_values("日期").reset_index(drop=True)
+        benchmark_pe_df.columns = ["date", "pe"]
     except Exception as e:
-        print(f"[数据缺失：基准指数PE历史，原因：{e}]")
+        print(f"[数据缺失：沪深300 PE历史，原因：{e}]")
 
-    if benchmark_pe_hist is not None and not benchmark_pe_hist.empty:
+    if benchmark_pe_df is not None and not benchmark_pe_df.empty:
         rel_df = pd.merge(
             pe_hist[["date", "pe"]],
-            benchmark_pe_hist[["date", "pe"]],
+            benchmark_pe_df[["date", "pe"]],
             on="date",
             how="inner",
             suffixes=("_index", "_benchmark"),
@@ -364,16 +439,18 @@ if crowding_ratio is not None:
     print(f"拥挤度活跃度：{crowding_metric} 5日/90日 = {crowding_ratio:.2f}x")
 
 try:
-    north_df = ak.stock_hsgt_north_net_flow_in_em()
-    date_col = next((c for c in north_df.columns if "日期" in c or "date" in c.lower()), None)
-    value_col = next((c for c in north_df.columns if "净流入" in c), None)
-    if date_col and value_col:
-        north_df = north_df[[date_col, value_col]].copy()
-        north_df.columns = ["date", "net_inflow"]
-        north_df["date"] = pd.to_datetime(north_df["date"])
-        north_df["net_inflow"] = pd.to_numeric(north_df["net_inflow"], errors="coerce")
-        north_10d = float(north_df.sort_values("date").tail(10)["net_inflow"].sum())
-        print(f"北向资金近10日净流入：{north_10d:.2f} 亿元")
+    # stock_hsgt_fund_flow_summary_em 返回沪股通/深股通南北向逐日数据
+    north_flow = ak.stock_hsgt_fund_flow_summary_em()
+    north_flow["交易日"] = pd.to_datetime(north_flow["交易日"])
+    north_flow["成交净买额"] = pd.to_numeric(north_flow["成交净买额"], errors="coerce")
+    # 只取北向（沪股通 + 深股通）
+    north_buy = north_flow[north_flow["板块"].isin(["沪股通", "深股通"])].copy()
+    if not north_buy.empty:
+        daily_net = north_buy.groupby("交易日")["成交净买额"].sum()
+        north_10d = float(daily_net.tail(10).sum())
+        print(f"北向资金近10日净流入（沪股通+深股通合计）：{north_10d:.2f} 亿元")
+    else:
+        print("[注] 北向资金数据暂无当日数据，可能未开市或数据为0")
 except Exception as e:
     print(f"[数据缺失：北向资金近10日净流入，原因：{e}]")
 ```
@@ -412,9 +489,6 @@ if current_pe is not None and current_pe <= 0:
 if pe_pct_5y is not None and pe_pct_5y > 90:
     print(f"⚠️ [WARN] PE 处于 5年 {pe_pct_5y:.1f}% 分位，处于历史高位区间")
 
-if pb_pct_5y is not None and pb_pct_5y > 90:
-    print(f"⚠️ [WARN] PB 处于 5年 {pb_pct_5y:.1f}% 分位，处于历史高位区间")
-
 if crowding_ratio is not None and crowding_ratio > 2.0:
     print(f"⚠️ [WARN] 活跃度比值 {crowding_ratio:.2f}x，短期可能过热")
 
@@ -432,12 +506,13 @@ if north_10d is None:
 | 数据项 | 降级路径 |
 |--------|----------|
 | 指数代码 / 编制机构 | 中证指数官网 https://www.csindex.com.cn |
-| 指数历史行情 | 新浪指数行情 / 东方财富指数页 / 交易所官网 |
-| PE / PB 当前值与历史分位 | 中证指数官网 / 理杏仁 https://www.lixinger.com |
+| 指数历史行情（BaoStock 未收录） | 腾讯行情 API（web.ifzq.gtimg.cn）/ 代表性 ETF 行情代理 |
+| PE 当前值与 5 年分位 | `ak.stock_zh_index_value_csindex` → 中证指数官网 → 理杏仁 |
+| PB | `stock_zh_index_value_csindex` 已不返回 PB，需手动从理杏仁或年报导出 |
 | 10年期国债收益率 | 中债收益率曲线 / 中国债券信息网 |
-| 北向资金近10日净流入 | 东方财富北向资金页 / 新浪北向资金页 |
-| 指数换手率 | 东方财富指数页；若仍缺失，改用代表性 ETF 的成交额或换手率代理，并标注 `[代理指标]` |
-| 成长指数相对估值 | 目标指数 PE 历史 + 沪深300 PE 历史，手动导出后计算 |
+| 北向资金近10日净流入 | `ak.stock_hsgt_fund_flow_summary_em` → 东方财富北向资金页 |
+| 指数换手率 | 东方财富指数页；若仍缺失，改用代表性 ETF 的成交额代理，并标注 `[代理指标]` |
+| 成长指数相对估值 | `ak.stock_zh_index_value_csindex`（目标指数 + 沪深300） → 手动计算 |
 
 所有无法获取的数据项必须以 `[数据缺失：原因]` 标注，不得跳过或估算。
 
@@ -448,19 +523,18 @@ if north_10d is None:
 逐项核对后方可进入 `choose-index-now` 或其他指数分析模块：
 
 ```text
-[ ] 指数名称、代码、BaoStock 代码已确认
+[ ] 指数名称与代码已确认（映射表/动态发现）
 [ ] 指数风格标签已确认：broad / large / mid / growth / dividend / theme
-[ ] 当前 PE + 5年分位
-[ ] 当前 PB + 5年分位
+[ ] 当前 PE + 5年分位（stock_zh_index_value_csindex）
+[ ] PB：[数据缺失：API不再返回]（如有需要手动从理杏仁补充）
 [ ] 10Y 国债收益率（含具体日期）
 [ ] 盈利收益率与股债比价
-[ ] 近60日收盘价序列
-[ ] 近18日最高价 / 最低价序列
+[ ] 近60日收盘价序列（BaoStock / 腾讯API）
 [ ] RSRS 得分（或明确标注历史长度不足）
 [ ] MA20 当前值 vs 5日前值
 [ ] 近30日涨幅
 [ ] 5日 / 90日 活跃度比值（换手率优先，成交额代理次之）
-[ ] 北向资金近10日净流入（或明确标注缺失）
+[ ] 北向资金近10日净流入（stock_hsgt_fund_flow_summary_em 或标注缺失）
 [ ] 成长指数专项：相对沪深300 PE 比值 + 5年分位
 [ ] 数据异常检测（Step 9）已执行并注释异常项
 ```
@@ -473,8 +547,7 @@ payload = {
     "index_code": index_code,
     "current_pe": current_pe,
     "pe_pct_5y": pe_pct_5y,
-    "current_pb": current_pb,
-    "pb_pct_5y": pb_pct_5y,
+    # PB: stock_zh_index_value_csindex 已不返回 PB，如有需要手动补充
     "bond_10y": bond_10y,
     "earnings_yield": earnings_yield,
     "rsrs_score": rsrs_score,
