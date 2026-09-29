@@ -1,6 +1,6 @@
 # 数据采集接口审查与使用约定
 
-审查日期：2026-09-29。采集代码在 `scripts/collect_finance.py`，接口隔离与降级在 `scripts/data_sources.py`，计算在 `scripts/finance_metrics.py`。本次保留工作区已有修改；`examples.py` 是依赖其他项目模块的参考代码，不作为可运行入口，也未直接接入生产采集。
+审查日期：2026-09-29。采集代码在 `scripts/collect_finance.py`，接口隔离与降级在 `scripts/data_sources.py`，计算在 `scripts/finance_metrics.py`。
 
 ## 审查发现与修正
 
