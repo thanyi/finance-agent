@@ -46,6 +46,8 @@ python -X utf8 .\scripts\eastmoney.py snapshot
 
 持仓表通过正常XLSX导出获取；导出向导控件核对类别、编号和文字，设置文件名后用带超时的WM_GETTEXT回读。每轮使用独立文件和哈希，不能复用旧导出。原始文件含个人字段，不加入Git或skill包。
 
+打开导出向导后，最多等待三秒确认其身份，不重复右键或菜单点击。等待期间出现其他对话框立即停止。若仍报告 `export_dialog_missing`，检查失败截图及新的 `doctor`；向导可能延迟出现，必须确认并取消这个导出向导后再重新采集，不能直接重放点击。
+
 默认刷新30秒一轮，共10轮，串行、不重叠。失败保留旧快照并标记过期。超时和界面未知不盲目重放点击；先重新诊断。进程锁见[Windows CreateMutex说明](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-createmutexw)，可操作桌面通过[OpenInputDesktop](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-openinputdesktop)核对。
 
 `test --scenario native` 不操作券商界面，只验证本机PowerShell、Unicode往返、PNG截图、跨进程互斥、释放和进程异常结束后的检查要求。其通过不能代替持仓采集或实盘交易验证。

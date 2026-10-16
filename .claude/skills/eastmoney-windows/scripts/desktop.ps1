@@ -181,12 +181,22 @@ function Click-Point([int[]]$point,[bool]$right=$false,[bool]$reviewedExitConfir
 }
 function Click-Target([string]$tag) {Click-Point (Point-For $tag)}
 function Export-Dialog {
- $found=@()
- foreach ($h in [EMDesktop]::Handles([IntPtr]::Zero)) {
-  if ([EMDesktop]::Owner([IntPtr]$h) -eq $script:client.Id -and [EMDesktop]::IsWindowVisible([IntPtr]$h) -and [EMDesktop]::Caption([IntPtr]$h) -eq '导出对话框') {$found+=[IntPtr]$h}
- }
- if($found.Count -ne 1){throw 'export_dialog_missing|Expected one export wizard'}
- return $found[0]
+ # Opening the wizard is asynchronous; poll identity, never replay the click.
+ $waiting=[Diagnostics.Stopwatch]::StartNew()
+ do {
+  Check-Deadline
+  $found=@()
+  foreach ($h in [EMDesktop]::Handles([IntPtr]::Zero)) {
+   if ([EMDesktop]::Owner([IntPtr]$h) -ne $script:client.Id -or -not [EMDesktop]::IsWindowVisible([IntPtr]$h)) {continue}
+   $title=[EMDesktop]::Caption([IntPtr]$h)
+   if ($title -eq '导出对话框') {$found+=[IntPtr]$h}
+   elseif ([EMDesktop]::Class([IntPtr]$h) -eq '#32770' -and $h -ne $script:trade.ToInt64()) {throw 'unexpected_dialog|Unknown dialog appeared while waiting for export'}
+  }
+  if ($found.Count -gt 1) {throw 'export_dialog_missing|Multiple export wizards'}
+  if ($found.Count -eq 1) {return $found[0]}
+  Start-Sleep -Milliseconds 100
+ } while ($waiting.Elapsed.TotalSeconds -lt 3)
+ throw 'export_dialog_missing|Export wizard did not appear within three seconds'
 }
 function Export-Button([IntPtr]$dialog,[int]$id,[string[]]$labels) {
  $button=[EMDesktop]::GetDlgItem($dialog,$id)

@@ -64,7 +64,7 @@ def snapshot(bridge: Bridge, run_dir: Path) -> dict:
     except OSError:
         mark_stale(bridge.output, "export_unreadable")
         save_json(run_dir / "failure.json", {"status": "export_unreadable", "at": now()})
-        raise BrokerError("export_unreadable", "Driver completed but the new shared export is not readable") from None
+        raise BrokerError("export_unreadable", "Driver completed but the new local export is not readable") from None
 
 
 def invalidate_calibration(bridge):
