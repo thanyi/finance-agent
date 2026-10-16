@@ -25,6 +25,7 @@ python3 -m venv .venv
 | `check-entry-timing` | `/check-entry-timing [指数]` | 指数介入时点信号 |
 | `check-etf-quality` | `/check-etf-quality [指数或ETF代码]` | 同指数 ETF 工具比较 |
 | `eastmoney-desktop` | `/eastmoney-desktop` 或 `$eastmoney-desktop` | Parallels 资金持仓采集、实盘不提交的填单检查及恢复验证、官网模拟盘买卖撤单测试 |
+| `eastmoney-windows` | `/eastmoney-windows` 或 `$eastmoney-windows` | Windows 本机直接读取资金持仓、检查填单及恢复；不需要 Mac、Parallels 或 QMT |
 
 > `analyze-stock` 会自动调用 `stock-data-collect` 完成数据采集后再执行分析。
 
@@ -91,3 +92,5 @@ CLAUDE.md                        # 全局数据纪律铁律
 ```
 
 `.claude/skills` 是项目 skill 的唯一内容源；Codex 通过 `.codex/skills` 中的链接读取相同内容。`eastmoney-desktop` 链接整个目录以共享脚本及参考资料，运行证据只保留在 Git 忽略的 `data/eastmoney/`。
+
+Windows 原生版位于 [eastmoney-windows](.claude/skills/eastmoney-windows/SKILL.md)，可复制整个目录后运行 `install.ps1` 安装；不依赖 Windows 的 Git 符号链接。个人运行数据位于 `%LOCALAPPDATA%\FinanceAgent\eastmoney-windows`，与 Mac 版配置分开。
