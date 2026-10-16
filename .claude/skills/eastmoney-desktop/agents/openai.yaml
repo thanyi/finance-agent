@@ -1,4 +1,4 @@
 interface:
   display_name: "东方财富桌面账户助手"
-  short_description: "通过 Parallels 读取东方财富资金持仓，验证填单和登录恢复流程"
+  short_description: "读取东方财富资金持仓、验证登录恢复，并测试官网模拟盘买卖撤单"
   default_prompt: "使用 $eastmoney-desktop 读取账户持仓并检查采集状态。"

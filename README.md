@@ -24,7 +24,7 @@ python3 -m venv .venv
 | `index-data-collect` | `/index-data-collect [指数]` | A股指数数据采集 |
 | `check-entry-timing` | `/check-entry-timing [指数]` | 指数介入时点信号 |
 | `check-etf-quality` | `/check-etf-quality [指数或ETF代码]` | 同指数 ETF 工具比较 |
-| `eastmoney-desktop` | `/eastmoney-desktop` 或 `$eastmoney-desktop` | Parallels 中的资金持仓采集、不提交委托的填单检查及会话恢复验证 |
+| `eastmoney-desktop` | `/eastmoney-desktop` 或 `$eastmoney-desktop` | Parallels 资金持仓采集、实盘不提交的填单检查及恢复验证、官网模拟盘买卖撤单测试 |
 
 > `analyze-stock` 会自动调用 `stock-data-collect` 完成数据采集后再执行分析。
 

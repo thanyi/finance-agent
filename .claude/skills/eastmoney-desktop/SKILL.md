@@ -1,6 +1,6 @@
 ---
 name: eastmoney-desktop
-description: 在 Mac 的 Parallels Windows 中读取东方财富证券资金与持仓，执行不提交委托的买卖填单检查，并验证刷新、认证失效和客户端恢复；用于桌面账户操作，不用于选股分析或真实下单。
+description: 在 Mac 的 Parallels Windows 中读取东方财富证券资金持仓、检查实盘填单但不提交、验证刷新与会话恢复；也用于东方财富官网模拟盘的买卖撤单测试，不用于选股分析或实盘下单。
 ---
 
 # 东方财富桌面账户助手
