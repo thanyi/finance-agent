@@ -24,6 +24,7 @@ python3 -m venv .venv
 | `index-data-collect` | `/index-data-collect [指数]` | A股指数数据采集 |
 | `check-entry-timing` | `/check-entry-timing [指数]` | 指数介入时点信号 |
 | `check-etf-quality` | `/check-etf-quality [指数或ETF代码]` | 同指数 ETF 工具比较 |
+| `eastmoney-desktop` | `/eastmoney-desktop` 或 `$eastmoney-desktop` | Parallels 中的资金持仓采集、不提交委托的填单检查及会话恢复验证 |
 
 > `analyze-stock` 会自动调用 `stock-data-collect` 完成数据采集后再执行分析。
 
@@ -89,4 +90,4 @@ tests/                           # 数据质量回归测试
 CLAUDE.md                        # 全局数据纪律铁律
 ```
 
-`.claude/skills` 是六个 skill 的唯一内容源；Codex 通过 `.codex/skills` 中的链接读取相同内容。
+`.claude/skills` 是项目 skill 的唯一内容源；Codex 通过 `.codex/skills` 中的链接读取相同内容。`eastmoney-desktop` 链接整个目录以共享脚本及参考资料，运行证据只保留在 Git 忽略的 `data/eastmoney/`。
